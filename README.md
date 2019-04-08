@@ -16,16 +16,16 @@ BOM:
      Electret microphone<br>
  
  PINS:
- 
+ 	
 	ADXL 375 -> Arduino (I2C):
 		GND -> GND
-      VCC -> 3.3V
-      SDA -> A4 / 4.75k resistor on 3.3v between A4 & SDA.
-      SCL -> A5 / 4.75k resistor on 3.3v between A5 & SCL
-      VS -> 3.3V
-      SDO -> GND
-      CS -> 3.3V
-      INT1 -> 3
+		VCC -> 3.3V
+		SDA -> A4 / 4.75k resistor on 3.3v between A4 & SDA.
+		SCL -> A5 / 4.75k resistor on 3.3v between A5 & SCL
+		VS -> 3.3V
+		SDO -> GND
+		CS -> 3.3V
+		INT1 -> 3
 
 	Segment -> Arduino:
 		VCC -> 5V
@@ -38,5 +38,5 @@ BOM:
 		VCC -> 5V
 		GND -> GND
 		DIN -> 12 ??
-	CS -> 9
-     CLK -> 11 ??
+		CS -> 9
+	     	CLK -> 11 ??
