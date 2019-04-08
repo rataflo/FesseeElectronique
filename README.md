@@ -5,7 +5,8 @@ Spank machine like high striker/strong man game in funfair.<br>
 Calculate velocity m/s, G impact and "clac" level of a spank.<br>
 Florent Galès 2019 / Licence rien à branler / Do what the fuck you want licence.<br>
 
-   BOM:
+BOM:
+   
      Arduino Nano.<br>
      ADXL375 / GY-291 Accelerometer. Mix of diffenrent libraries like adafruit adxl345 (calculation) & https://github.com/georgeredinger/ADXL375_Testing/tree/master/ADXL375<br>
      WS2812B led strip. Adafruit standard lib.<br>
@@ -13,7 +14,7 @@ Florent Galès 2019 / Licence rien à branler / Do what the fuck you want licenc
      8 digit 7 segment display. MAX7219 (SPI) : LedControl lib http://wayoda.github.io/LedControl/<br>
      4 x (8 x 8 led display) for score / high score. MAX7219.LedControl lib http://wayoda.github.io/LedControl/<br>
      Electret microphone<br>
-   
+ 
  PINS:
  
 	ADXL 375 -> Arduino (I2C):
