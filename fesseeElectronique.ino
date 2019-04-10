@@ -27,16 +27,25 @@
    Segement -> Arduino
      VCC -> 5V
      GND -> GND
-     DIN -> 12 ??
+     DIN -> 12
      CS -> 8
-     CLK -> 11 ??
+     CLK -> 13
 
    Led Matrix display (4 module 8x8) -> Arduino
     VCC -> 5V
      GND -> GND
-     DIN -> 12 ??
+     DIN -> 12
      CS -> 9
-     CLK -> 11 ??
+     CLK -> 13
+     
+   Strip WS2812B for score (30led/m) -> Arduino
+    VCC -> 5V
+    GND -> GND
+    DATA -> D6
+
+   Arcade button -> Arduino
+    pin 1 -> GND
+    pin 2 -> D4
 */
 
 #include "ADXL375.h"
@@ -49,7 +58,9 @@
 #define DROP_CLAC 30 // Min drop after a max event.
 #define SCORE_BELL 1000 // A which score we ring the bell.
 
-#define PIN_MIC 4
+#define PIN_MIC A3
+
+#define PIN_BTN 4
 
 #define PIN_STRIP_SCORE 6
 #define NBLED_STRIP_SCORE 60
@@ -71,7 +82,21 @@ unsigned long lastClac = 0;
 
 void setup(void)
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
+
+  // Start button
+  pinMode(PIN_BTN, INPUT_PULLUP);
+
+  // Mic
+  pinMode(PIN_MIC, INPUT);
+
+  stripScore.begin();
+  stripScore.clear();
+  stripScore.show();
+  stripClac.begin();
+  stripClac.setBrightness(60);
+  stripClac.clear();
+  stripClac.show();
   
   segment.setEnabled(true);
   segment.setIntensity(15);  // 1= min, 15=max
@@ -84,29 +109,33 @@ void setup(void)
   ledMatrix.setIntensity(5); // 1= min, 15=max
   ledMatrix.clear();
   ledMatrix.display();
-  
+
   //displayMessage("AAAAAAAA", 10);
   //displayMessage("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 30);
   //displayScore(9999);
-  
+  while(digitalRead(PIN_BTN) == HIGH){
+    // do nothing
+  }
+  /*showScoreAnim(999);
+  showScoreAnim(800);
+  showScoreAnim(500);
+  showScoreAnim(100);
+  showScoreAnim(1300);*/
   displayMs(213);
   displayG(10.89);
+  displayClacDb(1000);
   displayMessage("READY!", 50);
   drawString(" GO!", 4, 0, 0);
   ledMatrix.display();
 
-  stripScore.begin();
-  stripClac.begin();
-
-  // Mic
-  pinMode(PIN_MIC, INPUT);
-  
   // Adxl375 init
   //pinMode(3, INPUT);
   //attachInterrupt(digitalPinToInterrupt(3), shock, RISING); // Interruption if single shock (INT1)
   Wire.begin();        // join i2c bus (address optional for master)
   setupFIFO();
   readFrom(DEVICE, 0X30, 1, buff);
+
+  
 }
 
 void loop(void)
@@ -137,7 +166,7 @@ void loop(void)
         for(byte i = 0; i < 10; i++){
           Serial.println(fifo[i]);
         }
-        showClacAnim();
+
         float gForce = maxZ / 9.8;
         float velocity = calcVelocity(maxZ);
         float score = (mic/10) * gForce * velocity;
@@ -145,7 +174,7 @@ void loop(void)
         displayMs(velocity);
         displayG(gForce);
         displayClacDb(mic);
-        displayScore();
+        displayScore(score);
 
         // wait for 5s and reset.
         delay(5000);
@@ -201,22 +230,54 @@ float calcVelocity(float maxZ){
 }
 
 
-void showClacAnim(float score) {
-  byte level = map(score, 0, 10000, 0, NBLED_STRIP_SCORE);
-  float refresh = score / level;
+void showScoreAnim(float score) {
+  score = score > SCORE_BELL ? SCORE_BELL : score;
+  byte level = map(score, 0, SCORE_BELL, 0, NBLED_STRIP_SCORE);
 
-  for(byte i = 0; i < level; i++){
-    if(i > 0){
-      stripScore.setPixelColor(i, 0, 0, 0);
+  byte posAnim = 0;
+  long lastAnimMillis = 0;
+  float h ;     
+  float hauteur = score / SCORE_BELL;// An array of heights
+  float vImpact = sqrt( -2 * -1 * hauteur ); ;                   // As time goes on the impact velocity will change, so make an array to store those values
+  float tCycle ;                    // The time since the last time the ball struck the ground
+  int   pos ;                       // The integer position of the dot on the strip (LED index)
+  long  tLast ;                     // The clock time of the last ground strike
+  tLast = millis() - 1;
+  h = hauteur;
+  pos = 0;
+  tCycle = 0;
+
+  while (h > 0) {
+    long currentMillis = millis();
+    tCycle =  currentMillis - tLast ;     // Calculate the time since the last time the ball was on the ground
+    // Calculate position with time, acceleration (gravity) and intial velocity
+    h = 0.5 * -0.98 * pow( tCycle/1000 , 2.0 ) + vImpact * tCycle/1000;
+    pos = round( h * (level - 1) / hauteur);       // Map hauteur to pixel pos
+    stripScore.setPixelColor(pos, 255, 0, 0);
+    stripScore.show();
+    //Off for next loop.
+    stripScore.setPixelColor(pos, 0, 0, 0);
+
+    if(currentMillis - lastAnimMillis > 30 && posAnim < 33){
+      lastAnimMillis = currentMillis;
+      showClacAnim(posAnim);
+      posAnim++;
     }
-    stripScore.setPixelColor(i, 255, 0, 0);
-    stripScore.show(); 
-    
-    delay(refresh * (level * 10));
-  }
+ }
 
+  //Ring bell
   if(score > SCORE_BELL){
     ringBell();
+  }
+
+  // Finish matrix animation.
+  while(posAnim < 33){
+    long currentMillis = millis();
+    if(currentMillis - lastAnimMillis > 30){
+      lastAnimMillis = currentMillis;
+      showClacAnim(posAnim);
+      posAnim++;
+    }
   }
 }
 
@@ -227,18 +288,18 @@ void ringBell(){
 void displayClacDb(int mic) {
   byte level = map(mic, 0, 1024, 0, 10);
 
-  for(byte i = 0; i < level; i ++){
+  for(int i = 9; i >= 10 - level; i --){
     byte r = 0, g = 0, b = 0;
-    if(i < 2){
+    if(i > 7){
       b = 255;
-    } else if(i < 4){
+    } else if(i > 5){
       g = 255;
-    } else if(i < 6){
+    } else if(i > 3){
       r = 255;
-      b = 255;
-    } else if(i < 8){
+      g = 255;
+    } else if(i > 1){
       r = 255;
-      b = 255;
+      g = 69;
     } else {
       r = 255;
     }
@@ -409,10 +470,9 @@ void clearSegment() {
   segment.display();
 }
 
-void showClacAnim(){
-  int moveClacR = 8;
-  byte moveClacL = 16;
-  for(int i = 0; i < 33; i++){
+void showClacAnim(byte posAnim){
+  byte  i = posAnim;
+  //for(int i = 0; i < 33; i++){
     if(i == 0 || i == 6 || i == 12){
       drawSprite( CLAC[0], 16, 0, 8, 8 );
       drawSprite( CLAC[1], 8, 0, 8, 8 );
@@ -431,8 +491,9 @@ void showClacAnim(){
     }
     
     if(i > 4){
-      moveClacL++;
-      moveClacR--;
+      byte moveClacL = 12 + i;
+      int moveClacR = 12 -i;
+      
       drawSprite( CLAC[8], moveClacL, 0, 8, 8 );
       drawSprite( CLAC[9], moveClacR, 0, 8, 8 );
       if(i > 10){
@@ -453,6 +514,4 @@ void showClacAnim(){
       
     }
     ledMatrix.display();
-    delay(30);
-  }
 }
