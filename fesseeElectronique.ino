@@ -2,6 +2,8 @@
    La fessée électronique / The electronic spank.
    Spank machine like high striker/strong man game in funfair.
    Calculate velocity m/s, G impact and "clac" level of a spank.
+   Score led strip animation inspired by bouncing balls effect => https://www.tweaking4all.com/hardware/arduino/adruino-led-strip-effects/
+   
    Florent Galès 2019 / Licence rien à branler / Do what the fuck you want licence.
 
    BOM:
