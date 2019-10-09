@@ -1,0 +1,7 @@
+G-force acceleration:
+
+valeur = (Vitesse m/s finale - vitesse initiale / temps en secondes.)
+En G = valeur / 9.8
+
+200
+

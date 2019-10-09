@@ -81,7 +81,7 @@ void setupFIFO(){
   //  writeTo(DEVICE, 0x2D, 16);
   //9.1 active low interrupt.  
 
-  writeTo(DEVICE,ADXL375_DATA_FORMAT_REG,0b00011011);
+  writeTo(DEVICE,ADXL375_DATA_FORMAT_REG,0x0B);
 
   //1. Write 0x28 to Register 0x1D; set shock threshold to 31.2 g.
   // writeTo(DEVICE,0x1D,0x28); // 2,5 Gs for an ADXL345,(OX28/0xFF)*FSR
@@ -134,8 +134,8 @@ void setupFIFO(){
   //writeTo(DEVICE,ADXL375_WINDOW_REG,0);// 0 disable the double shock detection.
   //writeTo(DEVICE,ADXL375_ACT_INACT_CTL_REG,0x0);// 0 disable activity/incativity test on all axis.
   //writeTo(DEVICE, ADXL375_TAP_AXES_REG,0x1);// Enable only z in shock detection
-  writeTo(DEVICE, ADXL375_BW_RATE_REG,0x1D);// 100 Hz speed 0X0A, 800Hz 0X1D max i2C
-  
+  //writeTo(DEVICE, ADXL375_BW_RATE_REG,ADXL375_800HZ);// 100 Hz speed 0X0A, 800Hz 0X1D max i2C
+  writeTo(DEVICE, ADXL375_BW_RATE_REG, 0x0D);// 100 Hz speed 0X0A, 800Hz 0X1D max i2C
   writeTo(DEVICE,ADXL375_POWER_CTL_REG,0x08);
   
 }

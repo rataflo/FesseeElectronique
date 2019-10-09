@@ -17,10 +17,10 @@
    
     PINS:
      ADXL 375 -> Arduino (I2C)
-      GND -> GND
-      VCC -> 3.3V
-      SDA -> A4 / 4.75k resistor on 3.3v between A4 & SDA.
-      SCL -> A5 / 4.75k resistor on 3.3v between A5 & SCL
+      GND (marron) -> GND
+      VCC (orange) -> 3.3V
+      SDA (vert) -> A4 / 4.75k resistor on 3.3v between A4 & SDA.
+      SCL (bleu) -> A5 / 4.75k resistor on 3.3v between A5 & SCL
       VS -> 3.3V
       SDO -> GND
       CS -> 3.3V
@@ -48,6 +48,8 @@
    Arcade button -> Arduino
     pin 1 -> GND
     pin 2 -> D4
+
+   Mic:
 */
 
 #include "ADXL375.h"
@@ -55,10 +57,11 @@
 #include <Adafruit_NeoPixel.h>
 #include "constants.h"
 
-#define MIN_Z 10 // Min value to store data in fifo.
+#define MIN_Z 20 // Min value to store data in fifo.
 #define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1000 // A which score we ring the bell.
+#define SCORE_BELL 1000 // At which score we ring the bell.
+#define FIFOSIZE 40
 
 #define PIN_MIC A3
 
@@ -79,7 +82,9 @@ LEDMatrixDriver ledMatrix(4, 9);
 
 float maxZ = 0;
 char tabloScore[7] = {' ', ' ', ' ', ' ', ' ', ' ', ' '};
-float fifo[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+float fifo[FIFOSIZE];
+unsigned long times[FIFOSIZE];
 unsigned long lastClac = 0;
 
 void setup(void)
@@ -115,20 +120,20 @@ void setup(void)
   //displayMessage("AAAAAAAA", 10);
   //displayMessage("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 30);
   //displayScore(9999);
-  while(digitalRead(PIN_BTN) == HIGH){
+  //while(digitalRead(PIN_BTN) == HIGH){
     // do nothing
-  }
+  //}
   /*showScoreAnim(999);
   showScoreAnim(800);
   showScoreAnim(500);
   showScoreAnim(100);
   showScoreAnim(1300);*/
-  displayMs(213);
-  displayG(10.89);
-  displayClacDb(1000);
-  displayMessage("READY!", 50);
-  drawString(" GO!", 4, 0, 0);
-  ledMatrix.display();
+  //displayMs(213);
+  //displayG(10.89);
+  //displayClacDb(1000);
+  //displayMessage("READY!", 50);
+  //drawString(" GO!", 4, 0, 0);
+  //ledMatrix.display();
 
   // Adxl375 init
   //pinMode(3, INPUT);
@@ -137,7 +142,7 @@ void setup(void)
   setupFIFO();
   readFrom(DEVICE, 0X30, 1, buff);
 
-  
+  clearFifo();
 }
 
 void loop(void)
@@ -148,9 +153,11 @@ void loop(void)
   //readFrom(DEVICE, ADXL375_ACT_TAP_STATUS_REG, 1, buff);
   //Serial.println(buff[1]);
   //Serial.println(analogRead(A3));
-  //float x = getX() * ADXL345_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-  //float y = getY() * ADXL345_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+  float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+  float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
   float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
+  float vector = sqrt((x * x) + (y * y) + (z * z));
+  z = vector;
   //Serial.println(z);
   if(z > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
     insertNewValue(z);
@@ -159,24 +166,25 @@ void loop(void)
       maxZ = z;
     }else { // Max reached we test a big drop
      if(z < maxZ - DROP_CLAC){
-      if(maxZ > MIN_CLAC) { //We got a real spank!
+      if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
         int mic = analogRead(A3);
         
         // Show fifo
         Serial.print("CLAC:");
         Serial.println(mic);
-        for(byte i = 0; i < 10; i++){
+        for(byte i = 1; i < FIFOSIZE; i++){
           Serial.println(fifo[i]);
         }
-
         float gForce = maxZ / 9.8;
         float velocity = calcVelocity(maxZ);
+        Serial.print("velocity=");Serial.println(velocity);
+        Serial.print("G=");Serial.println(gForce);
         float score = (mic/10) * gForce * velocity;
-        showScoreAnim(score);
+        /*showScoreAnim(score);
         displayMs(velocity);
         displayG(gForce);
-        displayClacDb(mic);
-        displayScore(score);
+        displayClacDb(mic);*/
+        //displayScore(score);
 
         // wait for 5s and reset.
         delay(5000);
@@ -191,15 +199,25 @@ void loop(void)
       }
      }
     }
+  } else {
+    clearFifo();
+    maxZ = 0;
   }
 }
 
-void shock(){
-  Serial.println("choc");
+
+boolean checkValidity(){
+  //The fifo must not include 0 values (case of a pinch on the paddle and not a swing movement).
+  for(byte i = 1; i < FIFOSIZE; i++){
+    if(fifo[i] == 0){
+      return false;
+    }
+  }
+  return true;
 }
 
 void insertNewValue(float z){
-  for(byte i = 9; i > 0; i--){
+  for(byte i = FIFOSIZE - 1; i > 0; i--){
     fifo[i] = fifo[i - 1];
   }
   fifo[0] = z;
@@ -207,28 +225,27 @@ void insertNewValue(float z){
 }
 
 void clearFifo(){
-  for(byte i = 0; i < 10; i++){
+  for(byte i = 0; i < FIFOSIZE; i++){
     fifo[i] = 0;
   }
   //fifoCounter = 0;
 }
 
 float calcVelocity(float maxZ){
-  // Do not calculate with the impact and after.
-  float velocity = 0;
-  byte sum = 0;
-  bool bBeforeClac = false;
-  for(byte i = 1; i < 10; i++){
-    if(bBeforeClac){
-      velocity += fifo[i];
-      sum++;
-    }
-    if(fifo[i] == maxZ){
-      bBeforeClac = true; 
+  // calc average.
+  float average = 0;
+  for(byte i = 0; i < FIFOSIZE; i++){
+    average += fifo[i];
+  }
+  average = average / FIFOSIZE;
+  Serial.print("avg="); Serial.println(average);
+  // found the last values below average.
+  for(byte i = 0; i < FIFOSIZE; i++){
+    if(fifo[i] < average){
+      Serial.print("velocity="); Serial.println(fifo[i]);
+      return fifo[i];
     }
   }
-  velocity = velocity / sum;
-  return velocity;
 }
 
 
