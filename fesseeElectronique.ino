@@ -49,23 +49,26 @@
     pin 1 -> GND
     pin 2 -> D4
 
-   Mic:
+   Mic: A3 - 22kOhm between A+ and 5V.
+
+   Servo for bell: D7
 */
 
 #include "ADXL375.h"
 #include <LEDMatrixDriver.hpp>
 #include <Adafruit_NeoPixel.h>
+#include <Servo.h>
 #include "constants.h"
 
-#define MIN_Z 20 // Min value to store data in fifo.
-#define MIN_CLAC 100 // Minimum for a spank.
+#define MIN_Z 25 // Min value to store data in fifo.
+#define MIN_CLAC 110 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1000 // At which score we ring the bell.
+#define SCORE_BELL 1200 // At which score we ring the bell.
 #define FIFOSIZE 40
 
 #define PIN_MIC A3
-
 #define PIN_BTN 4
+#define PIN_SERVO_BELL 7
 
 #define PIN_STRIP_SCORE 6
 #define NBLED_STRIP_SCORE 60
@@ -81,16 +84,21 @@ LEDMatrixDriver segment (1, 8);
 LEDMatrixDriver ledMatrix(4, 9); 
 
 float maxZ = 0;
-char tabloScore[7] = {' ', ' ', ' ', ' ', ' ', ' ', ' '};
 
 float fifo[FIFOSIZE];
-unsigned long times[FIFOSIZE];
 unsigned long lastClac = 0;
+//unsigned long delayShowScore = 0;
+bool bStartPlay = false;
+int highScore;
+int maxMic = 0;
 
 void setup(void)
 {
   Serial.begin(9600);
 
+  // Servo bell
+  pinMode(PIN_SERVO_BELL, OUTPUT);
+  
   // Start button
   pinMode(PIN_BTN, INPUT_PULLUP);
 
@@ -116,62 +124,67 @@ void setup(void)
   ledMatrix.setIntensity(5); // 1= min, 15=max
   ledMatrix.clear();
   ledMatrix.display();
-
-  //displayMessage("AAAAAAAA", 10);
-  //displayMessage("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 30);
-  //displayScore(9999);
-  //while(digitalRead(PIN_BTN) == HIGH){
-    // do nothing
-  //}
-  /*showScoreAnim(999);
-  showScoreAnim(800);
-  showScoreAnim(500);
-  showScoreAnim(100);
-  showScoreAnim(1300);*/
-  //displayMs(213);
-  //displayG(10.89);
-  //displayClacDb(1000);
-  //displayMessage("READY!", 50);
-  //drawString(" GO!", 4, 0, 0);
-  //ledMatrix.display();
-
+  
   // Adxl375 init
-  //pinMode(3, INPUT);
-  //attachInterrupt(digitalPinToInterrupt(3), shock, RISING); // Interruption if single shock (INT1)
   Wire.begin();        // join i2c bus (address optional for master)
   setupFIFO();
   readFrom(DEVICE, 0X30, 1, buff);
 
   clearFifo();
+  // Load high score.
+  highScore = 1200;
+  stripScore.setPixelColor(0, 255, 0, 0);
+  stripScore.show();
+
+  //displayMessage("WORLD RECORD", 20);
+  //attracMode();
+  //delayShowScore = millis();
 }
 
 void loop(void)
 {
+  if(!bStartPlay){
+    while(digitalRead(PIN_BTN) == HIGH){
+      // Erase previous game after 5 sec delay.
+      /*if(millis() > delayShowScore + 5000){
+        delayShowScore = millis();
+        //resetGame();
+        Serial.println("loop3");
+      }*/
+    }
+    bStartPlay = true;
+    //resetGame();
+    //displayMessage("READY!", 20);
+    //drawString(" GO!", 4, 0, 0);
+    //ledMatrix.display();
+  }
+  
   unsigned long currentMillis = millis();
-  // Check si détection d'un choc sur l'axe Z
-  //byte buff[1];
-  //readFrom(DEVICE, ADXL375_ACT_TAP_STATUS_REG, 1, buff);
-  //Serial.println(buff[1]);
-  //Serial.println(analogRead(A3));
+  
   float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
   float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
   float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
   float vector = sqrt((x * x) + (y * y) + (z * z));
   z = vector;
+  Serial.print(z);
+  // mic read.
+  //int mic = analogRead(A3);
+  //maxMic = mic > maxMic ? mic : maxMic;
+    
   //Serial.println(z);
   if(z > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
     insertNewValue(z);
+
     //Détection du maxiumum
     if(z > maxZ){
       maxZ = z;
     }else { // Max reached we test a big drop
      if(z < maxZ - DROP_CLAC){
       if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
-        int mic = analogRead(A3);
         
         // Show fifo
         Serial.print("CLAC:");
-        Serial.println(mic);
+        
         for(byte i = 1; i < FIFOSIZE; i++){
           Serial.println(fifo[i]);
         }
@@ -179,19 +192,20 @@ void loop(void)
         float velocity = calcVelocity(maxZ);
         Serial.print("velocity=");Serial.println(velocity);
         Serial.print("G=");Serial.println(gForce);
-        float score = (mic/10) * gForce * velocity;
-        /*showScoreAnim(score);
+        Serial.print("MIC=");Serial.println(maxMic);
+        float score = maxMic + gForce + velocity;
+        Serial.print("SCORE=");Serial.println(score);
+        showScoreAnim(score);
         displayMs(velocity);
         displayG(gForce);
-        displayClacDb(mic);*/
-        //displayScore(score);
-
-        // wait for 5s and reset.
-        delay(5000);
+        displayClacDb(maxMic);
+        displayScore(score);
         clearFifo();
-        
         maxZ = 0;
+        maxMic = 0;
         lastClac = millis();
+        //delayShowScore = millis();
+        bStartPlay = false;
       } else { // false flag is not a "real" spank.
         clearFifo();
         maxZ = 0;
@@ -238,11 +252,10 @@ float calcVelocity(float maxZ){
     average += fifo[i];
   }
   average = average / FIFOSIZE;
-  Serial.print("avg="); Serial.println(average);
+  Serial.print("AVERAGE=");Serial.println(average);
   // found the last values below average.
   for(byte i = 0; i < FIFOSIZE; i++){
     if(fifo[i] < average){
-      Serial.print("velocity="); Serial.println(fifo[i]);
       return fifo[i];
     }
   }
@@ -360,7 +373,6 @@ void displayG(float x) {
 
 void displayScore(unsigned int score)
 {
-  Serial.println(score);
   if(score > 9999){
     score = 9999;
   }
@@ -388,7 +400,6 @@ void displayScore(unsigned int score)
     for(int i = 1; i <= centDigit ; i++){
       centScore = i * 100;
       sprintf(buf, "%03u", centScore);
-      Serial.println(buf);
       drawString(buf, 3, 0, 0);
       ledMatrix.display();
       delay(150);
@@ -418,6 +429,14 @@ void displayScore(unsigned int score)
       ledMatrix.display();
       delay(50);
     }
+  }
+
+  if(score > highScore){
+    highScore = score;
+    displayMessage("WORLD RECORD", 20);
+    displayMessage("WORLD RECORD", 20);
+
+    // Save high score.
   }
 }
 
@@ -534,3 +553,31 @@ void showClacAnim(byte posAnim){
     }
     ledMatrix.display();
 }
+
+void resetGame(){
+  ledMatrix.clear();
+  ledMatrix.display();
+  clearSegment();
+  stripScore.clear();
+  stripScore.setPixelColor(0, 255, 0, 0);
+  stripScore.show();
+  for(int i = 0; i < 10; i++){
+    stripClac.setPixelColor(i, 0, 0, 0);
+  }
+  stripClac.show(); 
+  //attracMode();
+}
+
+void attracMode(){
+  /*drawString("HIGH", 4, 0, 0);
+  ledMatrix.display();
+  delay(200);
+  drawString("SCORE", 4, 0, 0);
+  ledMatrix.display();
+  delay(200);*/
+  char buf[4];
+  sprintf(buf, "%04u", highScore);
+  drawString(buf, 4, 0, 0);
+  ledMatrix.display();
+}
+
