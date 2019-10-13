@@ -51,24 +51,47 @@
 
    Mic: A3 - 22kOhm between A+ and 5V.
 
-   Servo for bell: D7
+   Servo for bell: D10 -> Use this pin or D9 for working with neopixel.
 */
-
+#include "constants.h"
 #include "ADXL375.h"
 #include <LEDMatrixDriver.hpp>
 #include <Adafruit_NeoPixel.h>
-#include <Servo.h>
-#include "constants.h"
+/*#include <Adafruit_TiCoServo.h>
+#include <known_16bit_timers.h>*/
+//#include <Servo.h>
+#include <EEPROMex.h>
+#include <EEPROMVar.h>
+#include <MemoryUsage.h>
 
-#define MIN_Z 25 // Min value to store data in fifo.
-#define MIN_CLAC 110 // Minimum for a spank.
+
+#define FASTADC 1
+// defines for setting and clearing register bits
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+#endif
+#ifndef sbi
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
+#endif
+
+#define MIN_Z 20 // Min value to store data in fifo.
+#define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1200 // At which score we ring the bell.
-#define FIFOSIZE 40
+#define SCORE_BELL 1400 // At which score we ring the bell.
+#define FIFOSIZE 30
 
 #define PIN_MIC A3
 #define PIN_BTN 4
-#define PIN_SERVO_BELL 7
+#define PIN_SERVO_BELL 10
+#define SERVO_MIN 1000 // 1 ms pulse
+#define SERVO_MAX 2000 // 2 ms pulse
+
+const char msgWorldRecord[] PROGMEM = {"WORLD RECORD"};
+const char msgHighScore[] PROGMEM = {"HIGH SCORE"};
+const char msgReady[] PROGMEM = {"READY"};
+const char msgGo[] PROGMEM = {" GO!"};
+const char *const msgTable[] PROGMEM = {msgWorldRecord, msgHighScore, msgReady, msgGo};
+char bufferMsg[16]; 
 
 #define PIN_STRIP_SCORE 6
 #define NBLED_STRIP_SCORE 60
@@ -78,26 +101,33 @@ Adafruit_NeoPixel stripScore = Adafruit_NeoPixel(NBLED_STRIP_SCORE, PIN_STRIP_SC
 #define NBLED_STRIP_CLAC 10
 Adafruit_NeoPixel stripClac = Adafruit_NeoPixel(NBLED_STRIP_CLAC, PIN_STRIP_CLAC, NEO_GRB + NEO_KHZ800);
 
-byte buff[6] ;    //6 bytes buffer for saving data read from the device
-
 LEDMatrixDriver segment (1, 8);
 LEDMatrixDriver ledMatrix(4, 9); 
 
-float maxZ = 0;
+//Adafruit_TiCoServo servoBell;
 
-float fifo[FIFOSIZE];
-unsigned long lastClac = 0;
-//unsigned long delayShowScore = 0;
+byte buff[6] ;    //6 bytes buffer for saving data read from the device
+int fifo[FIFOSIZE];
 bool bStartPlay = false;
-int highScore;
+int highScore = 0;
+unsigned long lastClac = 0;
+int maxZ = 0;
 int maxMic = 0;
 
 void setup(void)
 {
+  #if FASTADC
+   // set prescale to 16
+   sbi(ADCSRA,ADPS2) ;
+   cbi(ADCSRA,ADPS1) ;
+   cbi(ADCSRA,ADPS0) ;
+  #endif
+
   Serial.begin(9600);
 
   // Servo bell
-  pinMode(PIN_SERVO_BELL, OUTPUT);
+  //servoBell.attach(PIN_SERVO_BELL, SERVO_MIN, SERVO_MAX);
+  //servoBell.write(1000);
   
   // Start button
   pinMode(PIN_BTN, INPUT_PULLUP);
@@ -118,7 +148,6 @@ void setup(void)
   segment.setScanLimit(7);  // 0-7: Show 1-8 digits. Beware of currenct restrictions for 1-3 digits! See datasheet.
   segment.setDecode(0xFF);  // Enable "BCD Type B" decoding for all digits.
   clearSegment();
-  //segment.setEnabled(false);
   
   ledMatrix.setEnabled(true);
   ledMatrix.setIntensity(5); // 1= min, 15=max
@@ -127,102 +156,92 @@ void setup(void)
   
   // Adxl375 init
   Wire.begin();        // join i2c bus (address optional for master)
-  setupFIFO();
   readFrom(DEVICE, 0X30, 1, buff);
-
+  // load high score from eeprom
+  highScore = EEPROM.readInt(1);
+  
+  setupFIFO();
   clearFifo();
-  // Load high score.
-  highScore = 1200;
-  stripScore.setPixelColor(0, 255, 0, 0);
-  stripScore.show();
-
-  //displayMessage("WORLD RECORD", 20);
-  //attracMode();
-  //delayShowScore = millis();
+  resetDisplay();
 }
 
 void loop(void)
 {
-  if(!bStartPlay){
-    while(digitalRead(PIN_BTN) == HIGH){
-      // Erase previous game after 5 sec delay.
-      /*if(millis() > delayShowScore + 5000){
-        delayShowScore = millis();
-        //resetGame();
-        Serial.println("loop3");
-      }*/
-    }
-    bStartPlay = true;
-    //resetGame();
-    //displayMessage("READY!", 20);
-    //drawString(" GO!", 4, 0, 0);
-    //ledMatrix.display();
-  }
+  waitForStart();
+  game();
   
-  unsigned long currentMillis = millis();
+}
   
-  float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-  float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-  float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
-  float vector = sqrt((x * x) + (y * y) + (z * z));
-  z = vector;
-  Serial.print(z);
-  // mic read.
-  //int mic = analogRead(A3);
-  //maxMic = mic > maxMic ? mic : maxMic;
-    
-  //Serial.println(z);
-  if(z > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
-    insertNewValue(z);
+void game(void)
+{
+  if(bStartPlay){
+    unsigned long currentMillis = millis();
 
-    //Détection du maxiumum
-    if(z > maxZ){
-      maxZ = z;
-    }else { // Max reached we test a big drop
-     if(z < maxZ - DROP_CLAC){
-      if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
-        
-        // Show fifo
-        Serial.print("CLAC:");
-        
-        for(byte i = 1; i < FIFOSIZE; i++){
-          Serial.println(fifo[i]);
+    float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
+    int vector = sqrt((x * x) + (y * y) + (z * z));
+    
+    //Serial.println(z);
+    if(vector > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
+      insertNewValue(vector);
+      //Détection du maxiumum
+      if(vector > maxZ){
+        maxZ = vector;
+        int mic = analogRead(A3);
+        maxMic = mic > maxMic ? mic : maxMic;
+      }else { // Max reached we test a big drop
+       if(vector < maxZ - DROP_CLAC){
+        if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
+          
+          // Show fifo
+          Serial.println("CLAC:");
+          Serial.print("mic:");
+          Serial.println(maxMic);
+          for(byte i = 0; i < FIFOSIZE; i++){
+            Serial.println(fifo[i]);
+          }
+          Serial.print("maxZ");Serial.println(maxZ);
+          float gForce = maxZ / 9.8;
+          int velocity = calcVelocity();
+          Serial.print("velocity=");Serial.println(velocity);
+          Serial.print("G=");Serial.println(gForce);
+          float scoreGame = float(maxMic) + float(velocity) + gForce;
+          Serial.print("score=");Serial.println(scoreGame);
+          clearFifo();
+          lastClac = millis();
+
+          showScoreAnim(scoreGame);
+          displayMs(velocity);
+          displayG(gForce);
+          displayClacDb(maxMic);
+          displayScore(round(scoreGame));
+          maxZ = 0;
+          maxMic = 0;
+          // wait for 4s and reset.
+          delay(4000);
+          
+          bStartPlay = false;
+        } else { // false flag is not a "real" spank.
+          clearFifo();
+          maxZ = 0;
+          maxMic = 0;
+          lastClac = millis();
         }
-        float gForce = maxZ / 9.8;
-        float velocity = calcVelocity(maxZ);
-        Serial.print("velocity=");Serial.println(velocity);
-        Serial.print("G=");Serial.println(gForce);
-        Serial.print("MIC=");Serial.println(maxMic);
-        float score = maxMic + gForce + velocity;
-        Serial.print("SCORE=");Serial.println(score);
-        showScoreAnim(score);
-        displayMs(velocity);
-        displayG(gForce);
-        displayClacDb(maxMic);
-        displayScore(score);
-        clearFifo();
-        maxZ = 0;
-        maxMic = 0;
-        lastClac = millis();
-        //delayShowScore = millis();
-        bStartPlay = false;
-      } else { // false flag is not a "real" spank.
-        clearFifo();
-        maxZ = 0;
-        lastClac = millis();
+       }
       }
-     }
+    } else {
+      clearFifo();
+      maxZ = 0;
+      maxMic = 0;
     }
-  } else {
-    clearFifo();
-    maxZ = 0;
   }
 }
 
 
 boolean checkValidity(){
   //The fifo must not include 0 values (case of a pinch on the paddle and not a swing movement).
-  for(byte i = 1; i < FIFOSIZE; i++){
+  for(byte i = 0; i < FIFOSIZE; i++){
     if(fifo[i] == 0){
       return false;
     }
@@ -230,65 +249,59 @@ boolean checkValidity(){
   return true;
 }
 
-void insertNewValue(float z){
+void insertNewValue(int z){
   for(byte i = FIFOSIZE - 1; i > 0; i--){
     fifo[i] = fifo[i - 1];
   }
   fifo[0] = z;
-  //fifoCounter = fifoCounter > 10 ? 10 : fifoCounter++;
 }
 
 void clearFifo(){
   for(byte i = 0; i < FIFOSIZE; i++){
     fifo[i] = 0;
   }
-  //fifoCounter = 0;
 }
 
-float calcVelocity(float maxZ){
+int calcVelocity(){
   // calc average.
-  float average = 0;
+  int sumVelo = 0;
+  int resultCalc = 0;
+
   for(byte i = 0; i < FIFOSIZE; i++){
-    average += fifo[i];
+    sumVelo += fifo[i];
   }
-  average = average / FIFOSIZE;
-  Serial.print("AVERAGE=");Serial.println(average);
-  // found the last values below average.
-  for(byte i = 0; i < FIFOSIZE; i++){
-    if(fifo[i] < average){
-      return fifo[i];
-    }
-  }
+  resultCalc = sumVelo / FIFOSIZE;
+  return resultCalc;
 }
 
 
-void showScoreAnim(float score) {
-  score = score > SCORE_BELL ? SCORE_BELL : score;
-  byte level = map(score, 0, SCORE_BELL, 0, NBLED_STRIP_SCORE);
-
+void showScoreAnim(float scoreGame) {
+  float tmpScore = scoreGame;
+  tmpScore = tmpScore > SCORE_BELL ? SCORE_BELL : tmpScore;
+  byte level = map(tmpScore, 0, SCORE_BELL, 0, NBLED_STRIP_SCORE);
   byte posAnim = 0;
-  long lastAnimMillis = 0;
-  float h ;     
-  float hauteur = score / SCORE_BELL;// An array of heights
+  unsigned long lastAnimMillis = 0;
+  float hTemp ;     
+  float hauteur = tmpScore / SCORE_BELL;// An array of heights
   float vImpact = sqrt( -2 * -1 * hauteur ); ;                   // As time goes on the impact velocity will change, so make an array to store those values
   float tCycle ;                    // The time since the last time the ball struck the ground
-  int   pos ;                       // The integer position of the dot on the strip (LED index)
+  int   posBall ;                       // The integer position of the dot on the strip (LED index)
   long  tLast ;                     // The clock time of the last ground strike
   tLast = millis() - 1;
-  h = hauteur;
-  pos = 0;
+  hTemp = hauteur;
+  posBall = 0;
   tCycle = 0;
 
-  while (h > 0) {
-    long currentMillis = millis();
+  while (hTemp > 0) {
+    unsigned long currentMillis = millis();
     tCycle =  currentMillis - tLast ;     // Calculate the time since the last time the ball was on the ground
     // Calculate position with time, acceleration (gravity) and intial velocity
-    h = 0.5 * -0.98 * pow( tCycle/1000 , 2.0 ) + vImpact * tCycle/1000;
-    pos = round( h * (level - 1) / hauteur);       // Map hauteur to pixel pos
-    stripScore.setPixelColor(pos, 255, 0, 0);
+    hTemp = 0.5 * -0.98 * pow( tCycle/1000 , 2.0 ) + vImpact * tCycle/1000;
+    posBall = round( hTemp * (level - 1) / hauteur);       // Map hauteur to pixel pos
+    stripScore.setPixelColor(posBall, 255, 0, 0);
     stripScore.show();
     //Off for next loop.
-    stripScore.setPixelColor(pos, 0, 0, 0);
+    stripScore.setPixelColor(posBall, 0, 0, 0);
 
     if(currentMillis - lastAnimMillis > 30 && posAnim < 33){
       lastAnimMillis = currentMillis;
@@ -298,13 +311,13 @@ void showScoreAnim(float score) {
  }
 
   //Ring bell
-  if(score > SCORE_BELL){
+  if(scoreGame > SCORE_BELL){
     ringBell();
   }
 
   // Finish matrix animation.
   while(posAnim < 33){
-    long currentMillis = millis();
+    unsigned long currentMillis = millis();
     if(currentMillis - lastAnimMillis > 30){
       lastAnimMillis = currentMillis;
       showClacAnim(posAnim);
@@ -320,7 +333,7 @@ void ringBell(){
 void displayClacDb(int mic) {
   byte level = map(mic, 0, 1024, 0, 10);
 
-  for(int i = 9; i >= 10 - level; i --){
+  for(byte i = 9; i >= 10 - level; i --){
     byte r = 0, g = 0, b = 0;
     if(i > 7){
       b = 255;
@@ -340,15 +353,12 @@ void displayClacDb(int mic) {
   stripClac.show(); 
 }
 
-void displayMs(float x) {
-  //segment.setEnabled(true);
-  unsigned int i = x > 999 ? 999 : x;
+void displayMs(int ms) {
+  ms = ms > 999 ? 999 : ms;
   char buf[4];
-  sprintf(buf, "%04u", i);
-
-  //segment.setDigit(7, i >= 1000 ? buf[0] : LEDMatrixDriver::BCD_BLANK, false);
-  segment.setDigit(7, i >= 100 ? buf[1] : LEDMatrixDriver::BCD_BLANK, false);
-  segment.setDigit(6, i >= 10 ? buf[2] : LEDMatrixDriver::BCD_BLANK, false);
+  sprintf(buf, "%04u", ms);
+  segment.setDigit(7, ms >= 100 ? buf[1] : LEDMatrixDriver::BCD_BLANK, false);
+  segment.setDigit(6, ms >= 10 ? buf[2] : LEDMatrixDriver::BCD_BLANK, false);
   segment.setDigit(5, buf[3], false);
   segment.display();
 }
@@ -371,82 +381,91 @@ void displayG(float x) {
   segment.display();
 }
 
-void displayScore(unsigned int score)
+void displayScore(int scoreGame)
 {
-  if(score > 9999){
-    score = 9999;
+  bool bHighScore = false;
+  if(scoreGame > 9999){
+    scoreGame = 9999;
+  }
+  if(scoreGame > highScore){
+    highScore = scoreGame;
+    bHighScore = true;
   }
   ledMatrix.clear();
   ledMatrix.display();
 
-  if(score > 1000){
-    unsigned int milleDigit = (score / 1000U) % 10;
-    unsigned int milleScore = 0;
-    char buf[4];
+  if(scoreGame > 1000){
+    int milleDigit = (scoreGame / 1000U) % 10;
+    int milleScore = 0;
+    char bufMille[5];
     for(int i = 1; i <= milleDigit ; i++){
       milleScore = i * 1000;
-      sprintf(buf, "%04u", milleScore);
-      drawString(buf, 4, 0, 0);
+      sprintf(bufMille, "%04u", milleScore);
+      drawString(bufMille, 4, 0, 0);
       ledMatrix.display();
       delay(300);
     }
-    score = score - milleScore;
+    scoreGame = scoreGame - milleScore;
   }
 
-  if(score > 100){
-    unsigned int centDigit = (score / 100U) % 10;
-    unsigned int centScore = 0;
-    char buf[3];
+  if(scoreGame > 100){
+    int centDigit = (scoreGame / 100U) % 10;
+    int centScore = 0;
+    char bufCent[4];
     for(int i = 1; i <= centDigit ; i++){
       centScore = i * 100;
-      sprintf(buf, "%03u", centScore);
-      drawString(buf, 3, 0, 0);
+      sprintf(bufCent, "%03u", centScore);
+      drawString(bufCent, 3, 0, 0);
       ledMatrix.display();
       delay(150);
     }
-    score = score - centScore;
+    scoreGame = scoreGame - centScore;
   }
 
-  if(score > 10){
-    unsigned int dixDigit = (score / 10U) % 10;
-    unsigned int dixScore = 0;
-    char buf[2];
+  if(scoreGame > 10){
+    int dixDigit = (scoreGame / 10U) % 10;
+    int dixScore = 0;
+    char bufDix[3];
     for(int i = 1; i <= dixDigit ; i++){
       dixScore = i * 10;
-      sprintf(buf, "%02u", dixScore);
-      drawString(buf, 2, 0, 0);
+      sprintf(bufDix, "%02u", dixScore);
+      drawString(bufDix, 2, 0, 0);
       ledMatrix.display();
       delay(100);
     }
-    score = score - dixScore;
+    scoreGame = scoreGame - dixScore;
   }
 
-  if(score > 1){
-    char buf[1];
-    for(int i = 1; i <= score ; i++){
-      sprintf(buf, "%01u", score);
-      drawString(buf, 1, 0, 0);
+  if(scoreGame > 1){
+    char bufDigit[2];
+    for(int i = 1; i <= scoreGame ; i++){
+      sprintf(bufDigit, "%01u", scoreGame);
+      drawString(bufDigit, 1, 0, 0);
       ledMatrix.display();
       delay(50);
     }
   }
 
-  if(score > highScore){
-    highScore = score;
-    displayMessage("WORLD RECORD", 20);
-    displayMessage("WORLD RECORD", 20);
-
-    // Save high score.
+  if(bHighScore){
+    strcpy_P(bufferMsg, (char *)pgm_read_word(&(msgTable[0])));
+    displayMessage(bufferMsg, 20);// world record message
+    delay(1000);
+    // save in eeprom.
+    EEPROM.writeInt(1, highScore);
   }
 }
 
 void displayMessage(char* text, byte msgSpeed){
-  int len = strlen(text);
+  byte len = strlen(text);
   //for(int i = 31; i > len * -8; i--){
   for(int i = len * -8; i <= 31 ; i++){
-    drawString(text, len, i, 0);
-    ledMatrix.display();
-    delay(msgSpeed);
+    if(digitalRead(PIN_BTN) == HIGH){
+      drawString(text, len, i, 0);
+      ledMatrix.display();
+      delay(msgSpeed);
+    } else {
+      return;
+    }
   }
 }
 
@@ -459,6 +478,7 @@ void drawString(char* text, int len, int x, int y )
   // reverse string : put the led matrix wrong side in the box...
   char reverse[len];
   byte car = 0;
+  byte image[8];
   for(int i = len - 1; i >= 0; i--){
     reverse[car] = text[i];
     car++;
@@ -473,8 +493,10 @@ void drawString(char* text, int len, int x, int y )
       return;
 
     // only draw if char is visible
-    if( 8 + x + idx * 8 > 0 )
-      drawSprite( font[c], x + idx * 8, y, 8, 8 );
+    if( 8 + x + idx * 8 > 0 ){
+      memcpy_P(&image, &font[c], 8);
+      drawSprite(image, x + idx * 8, y, 8, 8 );
+    }
   }
 }
 
@@ -509,44 +531,65 @@ void clearSegment() {
 }
 
 void showClacAnim(byte posAnim){
+  
+  byte image[8];    
   byte  i = posAnim;
   //for(int i = 0; i < 33; i++){
     if(i == 0 || i == 6 || i == 12){
-      drawSprite( CLAC[0], 16, 0, 8, 8 );
-      drawSprite( CLAC[1], 8, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[0], 8);
+      drawSprite(image, 16, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[1], 8);
+      drawSprite(image, 16, 0, 8, 8 );
     } else if(i == 1 || i == 7 || i == 13){
-      drawSprite( CLAC[2], 16, 0, 8, 8 );
-       drawSprite( CLAC[3], 8, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[2], 8);
+      drawSprite(image, 16, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[3], 8);
+      drawSprite(image, 8, 0, 8, 8 );
     } else if(i == 2 || i == 8 || i == 14){
-      drawSprite( CLAC[4], 16, 0, 8, 8 );
-      drawSprite( CLAC[5], 8, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[4], 8);
+      drawSprite(image, 16, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[5], 8);
+      drawSprite(image, 8, 0, 8, 8 );
     } else if(i == 3 || i == 9 || i == 15){
-      drawSprite( CLAC[6], 16, 0, 8, 8 );
-      drawSprite( CLAC[7], 8, 0, 8, 8 ); 
+      memcpy_P(&image, &CLAC[61], 8);
+      drawSprite(image, 16, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[7], 8);
+      drawSprite(image, 8, 0, 8, 8 ); 
     } else if(i == 4 || i == 10 || i == 16){
-      drawSprite( CLAC[8], 16, 0, 8, 8 );
-      drawSprite( CLAC[9], 8, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[8], 8);
+      drawSprite(image, 16, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[9], 8);
+      drawSprite(image, 8, 0, 8, 8 );
     }
     
     if(i > 4){
       byte moveClacL = 12 + i;
       int moveClacR = 12 -i;
-      
-      drawSprite( CLAC[8], moveClacL, 0, 8, 8 );
-      drawSprite( CLAC[9], moveClacR, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[8], 8);
+      drawSprite(image, moveClacL, 0, 8, 8 );
+      memcpy_P(&image, &CLAC[9], 8);
+      drawSprite(image, moveClacR, 0, 8, 8 );
       if(i > 10){
-        drawSprite( CLAC[8], moveClacL - 6, 0, 8, 8 );
-        drawSprite( CLAC[9], moveClacR + 6, 0, 8, 8 );
+        memcpy_P(&image, &CLAC[8], 8);
+        drawSprite(image, moveClacL - 6, 0, 8, 8 );
+        memcpy_P(&image, &CLAC[9], 8);
+        drawSprite(image, moveClacR + 6, 0, 8, 8 );
 
         if(i > 16){
           if(i > 25){
-            drawSprite(font[35], 24, 0, 8, 8); //C
-            drawSprite(font[35], 0, 0, 8, 8); //C
+            memcpy_P(&image, &font[35], 8);
+            drawSprite(image, 24, 0, 8, 8); //C
+            memcpy_P(&image, &font[35], 8);
+            drawSprite(image, 0, 0, 8, 8); //C
           }
-          drawSprite(font[44], 16, 0, 8, 8); //L
-          drawSprite(font[33], 8, 0, 8, 8); //A
-          drawSprite( CLAC[8], moveClacL - 12, 0, 8, 8 );
-          drawSprite( CLAC[9], moveClacR + 12, 0, 8, 8 );
+          memcpy_P(&image, &font[44], 8);
+          drawSprite(image, 16, 0, 8, 8); //L
+          memcpy_P(&image, &font[33], 8);
+          drawSprite(image, 8, 0, 8, 8); //A
+          memcpy_P(&image, &CLAC[8], 8);
+          drawSprite(image, moveClacL - 12, 0, 8, 8 );
+          memcpy_P(&image, &CLAC[19], 8);
+          drawSprite(image, moveClacR + 12, 0, 8, 8 );
         }
       }
       
@@ -554,30 +597,49 @@ void showClacAnim(byte posAnim){
     ledMatrix.display();
 }
 
-void resetGame(){
+void resetDisplay(){
   ledMatrix.clear();
   ledMatrix.display();
   clearSegment();
   stripScore.clear();
   stripScore.setPixelColor(0, 255, 0, 0);
   stripScore.show();
-  for(int i = 0; i < 10; i++){
+  for(byte i = 0; i < 10; i++){
     stripClac.setPixelColor(i, 0, 0, 0);
   }
   stripClac.show(); 
-  //attracMode();
 }
 
-void attracMode(){
-  /*drawString("HIGH", 4, 0, 0);
-  ledMatrix.display();
-  delay(200);
-  drawString("SCORE", 4, 0, 0);
-  ledMatrix.display();
-  delay(200);*/
-  char buf[4];
-  sprintf(buf, "%04u", highScore);
-  drawString(buf, 4, 0, 0);
-  ledMatrix.display();
-}
 
+
+void waitForStart(){
+  
+  if(!bStartPlay){
+    unsigned long delayShowScore = 0;
+    unsigned long currentMillis = millis();
+    resetDisplay();
+  
+    while(!bStartPlay){
+      while(digitalRead(PIN_BTN) == HIGH){
+        // Erase previous game after 5 sec delay.
+        if(currentMillis > delayShowScore){
+          delayShowScore = currentMillis + 10000;
+          resetDisplay();
+          strcpy_P(bufferMsg, (char *)pgm_read_word(&(msgTable[1])));
+          displayMessage(bufferMsg, 20);// high score message
+          if(digitalRead(PIN_BTN) == HIGH){
+            displayScore(highScore);
+          }
+        }
+      }
+      delay(300);
+      bStartPlay = true;
+      resetDisplay();
+      strcpy_P(bufferMsg, (char *)pgm_read_word(&(msgTable[2])));
+      displayMessage(bufferMsg, 20);// ready message.
+      strcpy_P(bufferMsg, (char *)pgm_read_word(&(msgTable[3])));
+      drawString(bufferMsg, 4, 0, 0); // Go! message.
+      ledMatrix.display();
+    }
+  }
+}
