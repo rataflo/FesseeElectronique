@@ -10,7 +10,9 @@
 ## BOM:
      Arduino Nano.
      ADXL375 / GY-291 Accelerometer. Mix of diffenrent libraries like adafruit adxl345 (calculation) & https://github.com/georgeredinger/ADXL375_Testing/tree/master/ADXL375
-     WS2812B led strip. Adafruit standard lib.
+     Paddle for spanking, hide adxl375 and electret inside. https://fr.aliexpress.com/item/32825780214.html
+     You can found a 3d printed enclosure to put the adxl375 at the back of the paddle. Inside the handle it give bad results. The electret must be placed at the bottom of the handle to avoid shock.
+     WS2812B led strip (one for score and one for clac db level with 10 led). Adafruit standard lib.
      Arcade switch button.
      8 digit 7 segment display. MAX7219 (SPI) : https://github.com/bartoszbielawski/LEDMatrixDriver
      4 x (8 x 8 led display) for score / high score. MAX7219.https://github.com/bartoszbielawski/LEDMatrixDriver
