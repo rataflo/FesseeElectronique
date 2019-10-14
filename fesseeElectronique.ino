@@ -57,9 +57,8 @@
 #include "ADXL375.h"
 #include <LEDMatrixDriver.hpp>
 #include <Adafruit_NeoPixel.h>
-/*#include <Adafruit_TiCoServo.h>
-#include <known_16bit_timers.h>*/
-//#include <Servo.h>
+#include <Adafruit_TiCoServo.h>
+#include <known_16bit_timers.h>
 #include <EEPROMex.h>
 #include <EEPROMVar.h>
 #include <MemoryUsage.h>
@@ -77,7 +76,7 @@
 #define MIN_Z 20 // Min value to store data in fifo.
 #define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1400 // At which score we ring the bell.
+#define SCORE_BELL 1500 // At which score we ring the bell. 1400
 #define FIFOSIZE 30
 
 #define PIN_MIC A3
@@ -104,7 +103,7 @@ Adafruit_NeoPixel stripClac = Adafruit_NeoPixel(NBLED_STRIP_CLAC, PIN_STRIP_CLAC
 LEDMatrixDriver segment (1, 8);
 LEDMatrixDriver ledMatrix(4, 9); 
 
-//Adafruit_TiCoServo servoBell;
+Adafruit_TiCoServo servoBell;
 
 byte buff[6] ;    //6 bytes buffer for saving data read from the device
 int fifo[FIFOSIZE];
@@ -123,11 +122,11 @@ void setup(void)
    cbi(ADCSRA,ADPS0) ;
   #endif
 
-  Serial.begin(9600);
+  //Serial.begin(9600);
 
   // Servo bell
-  //servoBell.attach(PIN_SERVO_BELL, SERVO_MIN, SERVO_MAX);
-  //servoBell.write(1000);
+  servoBell.attach(PIN_SERVO_BELL, SERVO_MIN, SERVO_MAX);
+  servoBell.write(1500);
   
   // Start button
   pinMode(PIN_BTN, INPUT_PULLUP);
@@ -175,39 +174,42 @@ void loop(void)
 void game(void)
 {
   if(bStartPlay){
+
     unsigned long currentMillis = millis();
 
     float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
     float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
     float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
     int vector = sqrt((x * x) + (y * y) + (z * z));
+    int mic = analogRead(A3);
+    maxMic = mic > maxMic ? mic : maxMic;
     
-    //Serial.println(z);
+    //Serial.println(vector);
     if(vector > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
       insertNewValue(vector);
+      
       //Détection du maxiumum
       if(vector > maxZ){
         maxZ = vector;
-        int mic = analogRead(A3);
-        maxMic = mic > maxMic ? mic : maxMic;
       }else { // Max reached we test a big drop
        if(vector < maxZ - DROP_CLAC){
         if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
-          
+          int mic = analogRead(A3);
+          maxMic = mic > maxMic ? mic : maxMic;
           // Show fifo
-          Serial.println("CLAC:");
+          /*Serial.println("CLAC:");
           Serial.print("mic:");
           Serial.println(maxMic);
           for(byte i = 0; i < FIFOSIZE; i++){
             Serial.println(fifo[i]);
           }
-          Serial.print("maxZ");Serial.println(maxZ);
+          Serial.print("maxZ");Serial.println(maxZ);*/
           float gForce = maxZ / 9.8;
           int velocity = calcVelocity();
-          Serial.print("velocity=");Serial.println(velocity);
-          Serial.print("G=");Serial.println(gForce);
+          //Serial.print("velocity=");Serial.println(velocity);
+          //Serial.print("G=");Serial.println(gForce);
           float scoreGame = float(maxMic) + float(velocity) + gForce;
-          Serial.print("score=");Serial.println(scoreGame);
+          //Serial.print("score=");Serial.println(scoreGame);
           clearFifo();
           lastClac = millis();
 
@@ -447,9 +449,9 @@ void displayScore(int scoreGame)
   }
 
   if(bHighScore){
+    delay(1000);
     strcpy_P(bufferMsg, (char *)pgm_read_word(&(msgTable[0])));
     displayMessage(bufferMsg, 20);// world record message
-    delay(1000);
     // save in eeprom.
     EEPROM.writeInt(1, highScore);
   }
