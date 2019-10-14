@@ -7,9 +7,11 @@
 #include <Wire.h>
 
 //#define ADXL345_MG2G_MULTIPLIER (0.00390625)  // 4mg per lsb 0.004
-#define ADXL375_MG2G_MULTIPLIER (0.049)  // 4mg per lsb 0.004
+//#define ADXL375_MG2G_MULTIPLIER (0.049)  // 4mg per lsb 0.004
+#define ADXL375_MG2G_MULTIPLIER (49)  // To avoid float calculation
 
-#define SENSORS_GRAVITY_STANDARD             (9.80665F)
+//#define SENSORS_GRAVITY_STANDARD             (9.80665F)
+#define SENSORS_GRAVITY_STANDARD             (9806) // To avoid float calculation
 #define ADXL375_ADDRESS                 (0x53)
 
 #define ADXL375_DEVID_REG          0x00
@@ -77,4 +79,3 @@ inline uint8_t i2cread(void);
 void writeTo(int device, byte address, byte val);
 void readFrom(int device, byte address, int num, byte buff[]);
 void setupFIFO();
-

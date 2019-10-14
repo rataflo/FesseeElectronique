@@ -11,9 +11,10 @@
      ADXL375 / GY-291 Accelerometer. Mix of diffenrent libraries like adafruit adxl345 (calculation) & https://github.com/georgeredinger/ADXL375_Testing/tree/master/ADXL375
      WS2812B led strip. Adafruit standard lib.
      Arcade switch button.
-     8 digit 7 segment display. MAX7219 (SPI) : LedControl lib http://wayoda.github.io/LedControl/
-     4 x (8 x 8 led display) for score / high score. MAX7219.LedControl lib http://wayoda.github.io/LedControl/
+     8 digit 7 segment display. MAX7219 (SPI) : https://github.com/bartoszbielawski/LEDMatrixDriver
+     4 x (8 x 8 led display) for score / high score. MAX7219.https://github.com/bartoszbielawski/LEDMatrixDriver
      Electret microphone
+     Servo: use TiCoServo to work with neopixel. 
    
     PINS:
      ADXL 375 -> Arduino (I2C)
@@ -49,7 +50,7 @@
     pin 1 -> GND
     pin 2 -> D4
 
-   Mic: A3 - 22kOhm between A+ and 5V.
+   Mic: A3 - 22kOhm between A3 and 5V.
 
    Servo for bell: D10 -> Use this pin or D9 for working with neopixel.
 */
@@ -177,10 +178,12 @@ void game(void)
 
     unsigned long currentMillis = millis();
 
-    float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-    float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-    float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
-    int vector = sqrt((x * x) + (y * y) + (z * z));
+    // Calculation avoid use of float to speed up code.
+    long x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    long y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    long z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
+    long vectorLong = sqrt((x * x) + (y * y) + (z * z));
+    int vector = vectorLong / 1000;
     int mic = analogRead(A3);
     maxMic = mic > maxMic ? mic : maxMic;
     
@@ -194,7 +197,7 @@ void game(void)
       }else { // Max reached we test a big drop
        if(vector < maxZ - DROP_CLAC){
         if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
-          int mic = analogRead(A3);
+          mic = analogRead(A3);// Last read.
           maxMic = mic > maxMic ? mic : maxMic;
           // Show fifo
           /*Serial.println("CLAC:");
