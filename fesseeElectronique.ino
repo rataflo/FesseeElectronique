@@ -58,8 +58,8 @@
 #include "ADXL375.h"
 #include <LEDMatrixDriver.hpp>
 #include <Adafruit_NeoPixel.h>
-#include <Adafruit_TiCoServo.h>
-#include <known_16bit_timers.h>
+//#include <Adafruit_TiCoServo.h>
+//#include <known_16bit_timers.h>
 #include <EEPROMex.h>
 #include <EEPROMVar.h>
 #include <MemoryUsage.h>
@@ -77,7 +77,7 @@
 #define MIN_Z 20 // Min value to store data in fifo.
 #define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1500 // At which score we ring the bell. 1400
+#define SCORE_BELL 700 // At which score we ring the bell. 1400
 #define FIFOSIZE 30
 
 #define PIN_MIC A3
@@ -104,8 +104,6 @@ Adafruit_NeoPixel stripClac = Adafruit_NeoPixel(NBLED_STRIP_CLAC, PIN_STRIP_CLAC
 LEDMatrixDriver segment (1, 8);
 LEDMatrixDriver ledMatrix(4, 9); 
 
-Adafruit_TiCoServo servoBell;
-
 byte buff[6] ;    //6 bytes buffer for saving data read from the device
 int fifo[FIFOSIZE];
 bool bStartPlay = false;
@@ -123,11 +121,11 @@ void setup(void)
    cbi(ADCSRA,ADPS0) ;
   #endif
 
-  //Serial.begin(9600);
+  Serial.begin(9600);
 
   // Servo bell
-  servoBell.attach(PIN_SERVO_BELL, SERVO_MIN, SERVO_MAX);
-  servoBell.write(1500);
+  pinMode(PIN_SERVO_BELL, OUTPUT);
+  digitalWrite(PIN_SERVO_BELL, LOW);
   
   // Start button
   pinMode(PIN_BTN, INPUT_PULLUP);
@@ -187,7 +185,7 @@ void game(void)
     int mic = analogRead(A3);
     maxMic = mic > maxMic ? mic : maxMic;
     
-    //Serial.println(vector);
+    Serial.println(vector);
     if(vector > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
       insertNewValue(vector);
       
@@ -281,6 +279,7 @@ int calcVelocity(){
 
 
 void showScoreAnim(float scoreGame) {
+  bool bRingBell = false;
   float tmpScore = scoreGame;
   tmpScore = tmpScore > SCORE_BELL ? SCORE_BELL : tmpScore;
   byte level = map(tmpScore, 0, SCORE_BELL, 0, NBLED_STRIP_SCORE);
@@ -308,17 +307,17 @@ void showScoreAnim(float scoreGame) {
     //Off for next loop.
     stripScore.setPixelColor(posBall, 0, 0, 0);
 
+    if(!bRingBell && posBall > NBLED_STRIP_SCORE && scoreGame > SCORE_BELL){
+      ringBell();
+      bRingBell = true;
+    }
+    
     if(currentMillis - lastAnimMillis > 30 && posAnim < 33){
       lastAnimMillis = currentMillis;
       showClacAnim(posAnim);
       posAnim++;
     }
  }
-
-  //Ring bell
-  if(scoreGame > SCORE_BELL){
-    ringBell();
-  }
 
   // Finish matrix animation.
   while(posAnim < 33){
@@ -332,7 +331,9 @@ void showScoreAnim(float scoreGame) {
 }
 
 void ringBell(){
-  
+  digitalWrite(PIN_SERVO_BELL, HIGH);
+  delay(500);
+  digitalWrite(PIN_SERVO_BELL, LOW);
 }
 
 void displayClacDb(int mic) {
@@ -626,6 +627,7 @@ void waitForStart(){
   
     while(!bStartPlay){
       while(digitalRead(PIN_BTN) == HIGH){
+        currentMillis = millis();
         // Erase previous game after 5 sec delay.
         if(currentMillis > delayShowScore){
           delayShowScore = currentMillis + 10000;
