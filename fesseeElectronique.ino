@@ -77,7 +77,7 @@
 #define MIN_Z 20 // Min value to store data in fifo.
 #define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 700 // At which score we ring the bell. 1400
+#define SCORE_BELL 1500 // At which score we ring the bell. 1400
 #define FIFOSIZE 30
 
 #define PIN_MIC A3
@@ -177,18 +177,15 @@ void game(void)
     unsigned long currentMillis = millis();
 
     // Calculation avoid use of float to speed up code.
-    long x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-    long y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
-    long z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
-    long vectorLong = sqrt((x * x) + (y * y) + (z * z));
-    int vector = vectorLong / 1000;
-    int mic = analogRead(A3);
-    maxMic = mic > maxMic ? mic : maxMic;
+    float x = getX() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    float y = getY() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD;
+    float z = getZ() * ADXL375_MG2G_MULTIPLIER * SENSORS_GRAVITY_STANDARD; //<= format en mG/LSB (milli G par Last Significant Bit). ADXL375 = 49mg/LSB. Donc z en G = z * 0.049
+    int vector = sqrt((x * x) + (y * y) + (z * z));
     
-    Serial.println(vector);
     if(vector > MIN_Z && currentMillis > lastClac + 500){ // If last clac after 1/2 second.
       insertNewValue(vector);
-      
+      int mic = analogRead(A3);
+      maxMic = mic > maxMic ? mic : maxMic;
       //Détection du maxiumum
       if(vector > maxZ){
         maxZ = vector;
@@ -196,7 +193,9 @@ void game(void)
        if(vector < maxZ - DROP_CLAC){
         if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
           mic = analogRead(A3);// Last read.
-          maxMic = mic > maxMic ? mic : maxMic;
+          
+          maxMic = (maxMic + mic) / 2;
+          Serial.println(maxMic);
           // Show fifo
           /*Serial.println("CLAC:");
           Serial.print("mic:");
@@ -307,7 +306,7 @@ void showScoreAnim(float scoreGame) {
     //Off for next loop.
     stripScore.setPixelColor(posBall, 0, 0, 0);
 
-    if(!bRingBell && posBall > NBLED_STRIP_SCORE && scoreGame > SCORE_BELL){
+    if(!bRingBell && posBall == NBLED_STRIP_SCORE && scoreGame > SCORE_BELL){
       ringBell();
       bRingBell = true;
     }
