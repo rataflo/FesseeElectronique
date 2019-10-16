@@ -194,7 +194,7 @@ void game(void)
         if(maxZ > MIN_CLAC && checkValidity()) { //We got a real spank!
           mic = analogRead(A3);// Last read.
           
-          maxMic = (maxMic + mic) / 2;
+          maxMic = mic > maxMic ? mic : maxMic;
           Serial.println(maxMic);
           // Show fifo
           /*Serial.println("CLAC:");
@@ -336,7 +336,7 @@ void ringBell(){
 }
 
 void displayClacDb(int mic) {
-  byte level = map(mic, 0, 1024, 0, 10);
+  byte level = map(mic, 0, 1023, 0, 10);
 
   for(byte i = 9; i >= 10 - level; i --){
     byte r = 0, g = 0, b = 0;
