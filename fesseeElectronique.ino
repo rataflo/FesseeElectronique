@@ -161,6 +161,8 @@ void setup(void)
   setupFIFO();
   clearFifo();
   resetDisplay();
+
+  showScoreAnim(1501);
 }
 
 void loop(void)
@@ -306,7 +308,11 @@ void showScoreAnim(float scoreGame) {
     //Off for next loop.
     stripScore.setPixelColor(posBall, 0, 0, 0);
 
+    Serial.println(bRingBell);
+    Serial.println(posBall);
+    Serial.println(scoreGame);
     if(!bRingBell && posBall == NBLED_STRIP_SCORE && scoreGame > SCORE_BELL){
+      Serial.println("ding");
       ringBell();
       bRingBell = true;
     }
