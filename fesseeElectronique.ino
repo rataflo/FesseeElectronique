@@ -62,7 +62,7 @@
 //#include <known_16bit_timers.h>
 #include <EEPROMex.h>
 #include <EEPROMVar.h>
-#include <MemoryUsage.h>
+//#include <MemoryUsage.h>
 
 
 #define FASTADC 1
@@ -77,7 +77,7 @@
 #define MIN_Z 20 // Min value to store data in fifo.
 #define MIN_CLAC 100 // Minimum for a spank.
 #define DROP_CLAC 30 // Min drop after a max event.
-#define SCORE_BELL 1500 // At which score we ring the bell. 1400
+#define SCORE_BELL 1800 // At which score we ring the bell. 1400
 #define FIFOSIZE 30
 
 #define PIN_MIC A3
@@ -161,8 +161,6 @@ void setup(void)
   setupFIFO();
   clearFifo();
   resetDisplay();
-
-  showScoreAnim(1501);
 }
 
 void loop(void)
@@ -199,19 +197,19 @@ void game(void)
           maxMic = mic > maxMic ? mic : maxMic;
           Serial.println(maxMic);
           // Show fifo
-          /*Serial.println("CLAC:");
+          Serial.println("CLAC:");
           Serial.print("mic:");
           Serial.println(maxMic);
           for(byte i = 0; i < FIFOSIZE; i++){
             Serial.println(fifo[i]);
           }
-          Serial.print("maxZ");Serial.println(maxZ);*/
+          Serial.print("maxZ");Serial.println(maxZ);
           float gForce = maxZ / 9.8;
           int velocity = calcVelocity();
-          //Serial.print("velocity=");Serial.println(velocity);
-          //Serial.print("G=");Serial.println(gForce);
+          Serial.print("velocity=");Serial.println(velocity);
+          Serial.print("G=");Serial.println(gForce);
           float scoreGame = float(maxMic) + float(velocity) + gForce;
-          //Serial.print("score=");Serial.println(scoreGame);
+          Serial.print("score=");Serial.println(scoreGame);
           clearFifo();
           lastClac = millis();
 
@@ -219,11 +217,14 @@ void game(void)
           displayMs(velocity);
           displayG(gForce);
           displayClacDb(maxMic);
+          Serial.println("displayScore_debut");
           displayScore(round(scoreGame));
+          Serial.println("displayScore_fin");
           maxZ = 0;
           maxMic = 0;
           // wait for 4s and reset.
           delay(4000);
+          //clearFifo();
           
           bStartPlay = false;
         } else { // false flag is not a "real" spank.
@@ -308,11 +309,7 @@ void showScoreAnim(float scoreGame) {
     //Off for next loop.
     stripScore.setPixelColor(posBall, 0, 0, 0);
 
-    Serial.println(bRingBell);
-    Serial.println(posBall);
-    Serial.println(scoreGame);
     if(!bRingBell && posBall == NBLED_STRIP_SCORE && scoreGame > SCORE_BELL){
-      Serial.println("ding");
       ringBell();
       bRingBell = true;
     }
@@ -342,9 +339,12 @@ void ringBell(){
 }
 
 void displayClacDb(int mic) {
+  Serial.println("displayClacDb");
   byte level = map(mic, 0, 1023, 0, 10);
-
-  for(byte i = 9; i >= 10 - level; i --){
+Serial.println(level);
+  for(int i = 9; i >= 10 - level; i--){
+    Serial.print("i");
+    Serial.println(i);
     byte r = 0, g = 0, b = 0;
     if(i > 7){
       b = 255;
@@ -362,6 +362,7 @@ void displayClacDb(int mic) {
     stripClac.setPixelColor(i, r, g, b);
   }
   stripClac.show(); 
+  Serial.println("displayClacDb_fin");
 }
 
 void displayMs(int ms) {
